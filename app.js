@@ -1,14 +1,23 @@
 // 任务数据存储
 let tasks = [];
+let archives = [];
 
 // 从 localStorage 加载数据
 function loadFromLocalStorage() {
-    const saved = localStorage.getItem('todoListData');
-    if (saved) {
+    const savedTasks = localStorage.getItem('todoListData');
+    const savedArchives = localStorage.getItem('todoListArchives');
+    if (savedTasks) {
         try {
-            tasks = JSON.parse(saved);
+            tasks = JSON.parse(savedTasks);
         } catch (e) {
             tasks = [];
+        }
+    }
+    if (savedArchives) {
+        try {
+            archives = JSON.parse(savedArchives);
+        } catch (e) {
+            archives = [];
         }
     }
     renderTasks();
@@ -17,11 +26,25 @@ function loadFromLocalStorage() {
 // 保存到 localStorage
 function saveToLocalStorage() {
     localStorage.setItem('todoListData', JSON.stringify(tasks));
+    localStorage.setItem('todoListArchives', JSON.stringify(archives));
 }
 
 // 生成唯一 ID
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
+
+// 格式化日期时间
+function formatDateTime(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 }
 
 // 计算任务进度
@@ -68,14 +91,20 @@ function renderTasks() {
     emptyState.style.display = 'none';
     taskList.innerHTML = tasks.map(task => {
         const progress = calculateTaskProgress(task);
+        const isCompleted = progress === 100;
         return `
-            <div class="task-card" data-task-id="${task.id}">
+            <div class="task-card ${isCompleted ? 'completed' : ''}" data-task-id="${task.id}">
                 <div class="task-header">
                     <div class="task-title">${escapeHtml(task.name)}</div>
                     <div class="task-actions">
+                        <button class="btn btn-archive" onclick="archiveTask('${task.id}')">📁 归档</button>
                         <button class="btn btn-small" onclick="showAddSubtaskModal('${task.id}')">➕ 添加子任务</button>
                         <button class="btn-icon" onclick="deleteTask('${task.id}')">🗑️</button>
                     </div>
+                </div>
+                <div class="task-meta">
+                    <span>🕐 创建: ${formatDateTime(task.createdAt)}</span>
+                    ${task.completedAt ? `<span>✅ 完成: ${formatDateTime(task.completedAt)}</span>` : ''}
                 </div>
                 <div class="task-progress">
                     <div class="progress-bar">
@@ -90,6 +119,7 @@ function renderTasks() {
                                 ${subtask.completed ? 'checked' : ''} 
                                 onchange="toggleSubtask('${task.id}', '${subtask.id}')">
                             <span class="subtask-text">${escapeHtml(subtask.text)}</span>
+                            ${subtask.completedAt ? `<span class="subtask-time">✓ ${formatDateTime(subtask.completedAt)}</span>` : ''}
                             <button class="subtask-delete" onclick="deleteSubtask('${task.id}', '${subtask.id}')">删除</button>
                         </div>
                     `).join('')}
@@ -159,13 +189,15 @@ function confirmAddTask() {
 
     const subtaskInputs = document.querySelectorAll('.subtask-input');
     const subtasks = [];
+    const now = new Date().toISOString();
     subtaskInputs.forEach(input => {
         const text = input.value.trim();
         if (text) {
             subtasks.push({
                 id: generateId(),
                 text: text,
-                completed: false
+                completed: false,
+                createdAt: now
             });
         }
     });
@@ -174,7 +206,8 @@ function confirmAddTask() {
         id: generateId(),
         name: name,
         subtasks: subtasks,
-        createdAt: new Date().toISOString()
+        createdAt: now,
+        completedAt: null
     };
 
     tasks.push(task);
@@ -199,6 +232,20 @@ function toggleSubtask(taskId, subtaskId) {
         const subtask = task.subtasks.find(st => st.id === subtaskId);
         if (subtask) {
             subtask.completed = !subtask.completed;
+            if (subtask.completed) {
+                subtask.completedAt = new Date().toISOString();
+            } else {
+                subtask.completedAt = null;
+            }
+
+            // 检查任务是否全部完成
+            const allCompleted = task.subtasks.every(st => st.completed);
+            if (allCompleted && task.subtasks.length > 0) {
+                task.completedAt = new Date().toISOString();
+            } else {
+                task.completedAt = null;
+            }
+
             saveToLocalStorage();
             renderTasks();
         }
@@ -215,7 +262,7 @@ function deleteSubtask(taskId, subtaskId) {
     }
 }
 
-// 显示添加子任务模态框（复用添加任务模态框）
+// 显示添加子任务模态框
 function showAddSubtaskModal(taskId) {
     const text = prompt('请输入子任务内容：');
     if (text && text.trim()) {
@@ -224,12 +271,140 @@ function showAddSubtaskModal(taskId) {
             task.subtasks.push({
                 id: generateId(),
                 text: text.trim(),
-                completed: false
+                completed: false,
+                createdAt: new Date().toISOString(),
+                completedAt: null
             });
             saveToLocalStorage();
             renderTasks();
         }
     }
+}
+
+// 归档任务
+function archiveTask(taskId) {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const progress = calculateTaskProgress(task);
+    const isCompleted = progress === 100;
+    const statusText = isCompleted ? '已完成' : `进度 ${progress}%`;
+
+    if (!confirm(`确定要将任务 "${task.name}" (${statusText}) 归档吗？归档后将从当前列表移除。`)) {
+        return;
+    }
+
+    const archiveItem = {
+        id: generateId(),
+        taskId: task.id,
+        name: task.name,
+        createdAt: task.createdAt,
+        completedAt: task.completedAt,
+        archivedAt: new Date().toISOString(),
+        progress: progress,
+        subtasks: task.subtasks.map(st => ({
+            text: st.text,
+            completed: st.completed,
+            createdAt: st.createdAt,
+            completedAt: st.completedAt
+        }))
+    };
+
+    archives.unshift(archiveItem);
+    tasks = tasks.filter(t => t.id !== taskId);
+    saveToLocalStorage();
+    renderTasks();
+    alert('任务已归档！');
+}
+
+// 显示归档模态框
+function showArchiveModal() {
+    document.getElementById('archiveModal').classList.add('active');
+    renderArchives();
+}
+
+// 关闭归档模态框
+function closeArchiveModal() {
+    document.getElementById('archiveModal').classList.remove('active');
+}
+
+// 渲染归档列表
+function renderArchives() {
+    const archiveList = document.getElementById('archiveList');
+
+    if (archives.length === 0) {
+        archiveList.innerHTML = `
+            <div class="archive-empty">
+                <div class="archive-empty-icon">📁</div>
+                <p>暂无归档任务</p>
+            </div>
+        `;
+        return;
+    }
+
+    archiveList.innerHTML = `
+        <div class="archive-list">
+            ${archives.map(archive => `
+                <div class="archive-item">
+                    <div class="archive-header">
+                        <div class="archive-title">${escapeHtml(archive.name)}</div>
+                        <div class="archive-actions">
+                            <button class="btn btn-small btn-danger" onclick="deleteArchive('${archive.id}')">🗑️ 删除</button>
+                        </div>
+                    </div>
+                    <div class="archive-meta">
+                        <span>🕐 创建: ${formatDateTime(archive.createdAt)}</span>
+                        ${archive.completedAt ? `<span>✅ 完成: ${formatDateTime(archive.completedAt)}</span>` : `<span>📊 归档时进度: ${archive.progress ?? 0}%</span>`}
+                        <span>📁 归档: ${formatDateTime(archive.archivedAt)}</span>
+                    </div>
+                    <div class="archive-subtasks">
+                        ${archive.subtasks.map(st => `
+                            <div class="archive-subtask">
+                                <span class="archive-subtask-text ${st.completed ? 'completed' : ''}">
+                                    ${st.completed ? '✅' : '⬜'} ${escapeHtml(st.text)}
+                                </span>
+                                ${st.completedAt ? `<span class="archive-subtask-time">✓ ${formatDateTime(st.completedAt)}</span>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// 删除归档
+function deleteArchive(archiveId) {
+    if (confirm('确定要删除这条归档记录吗？')) {
+        archives = archives.filter(a => a.id !== archiveId);
+        saveToLocalStorage();
+        renderArchives();
+    }
+}
+
+// 导出归档到文件
+function exportArchiveToFile() {
+    if (archives.length === 0) {
+        alert('当前没有归档记录可导出！');
+        return;
+    }
+
+    const data = {
+        version: '2.0',
+        exportType: 'archive',
+        exportDate: new Date().toISOString(),
+        archives: archives
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `todo-archive-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 // 清空所有任务
@@ -253,9 +428,10 @@ function saveToFile() {
     }
 
     const data = {
-        version: '1.0',
+        version: '2.0',
         exportDate: new Date().toISOString(),
-        tasks: tasks
+        tasks: tasks,
+        archives: archives
     };
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -278,6 +454,8 @@ function loadFromFile(event) {
     reader.onload = function(e) {
         try {
             const data = JSON.parse(e.target.result);
+            let loaded = false;
+
             if (data.tasks && Array.isArray(data.tasks)) {
                 if (tasks.length > 0) {
                     if (!confirm('当前已有任务，加载文件将覆盖现有任务，是否继续？')) {
@@ -285,9 +463,18 @@ function loadFromFile(event) {
                     }
                 }
                 tasks = data.tasks;
+                loaded = true;
+            }
+
+            if (data.archives && Array.isArray(data.archives)) {
+                archives = data.archives;
+                loaded = true;
+            }
+
+            if (loaded) {
                 saveToLocalStorage();
                 renderTasks();
-                alert('任务加载成功！');
+                alert('数据加载成功！');
             } else {
                 alert('文件格式不正确！');
             }
@@ -303,6 +490,7 @@ function loadFromFile(event) {
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         closeAddTaskModal();
+        closeArchiveModal();
     }
 });
 
@@ -310,6 +498,12 @@ document.addEventListener('keydown', function(e) {
 document.getElementById('addTaskModal').addEventListener('click', function(e) {
     if (e.target === this) {
         closeAddTaskModal();
+    }
+});
+
+document.getElementById('archiveModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeArchiveModal();
     }
 });
 

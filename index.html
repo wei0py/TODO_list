@@ -24,6 +24,7 @@
             <button class="btn btn-secondary" onclick="saveToFile()">💾 保存到文件</button>
             <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">📂 从文件加载</button>
             <input type="file" id="fileInput" accept=".json" style="display: none;" onchange="loadFromFile(event)">
+            <button class="btn btn-archive" onclick="showArchiveModal()">📁 归档管理</button>
             <button class="btn btn-danger" onclick="clearAllTasks()">🗑️ 清空所有</button>
         </div>
 
@@ -63,6 +64,25 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeAddTaskModal()">取消</button>
                 <button class="btn btn-primary" onclick="confirmAddTask()">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 归档管理模态框 -->
+    <div id="archiveModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>📁 归档管理</h2>
+                <button class="close-btn" onclick="closeArchiveModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="archiveList">
+                    <!-- 归档列表将在这里动态生成 -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeArchiveModal()">关闭</button>
+                <button class="btn btn-primary" onclick="exportArchiveToFile()">📥 导出归档</button>
             </div>
         </div>
     </div>
