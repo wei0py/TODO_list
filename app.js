@@ -486,11 +486,308 @@ function loadFromFile(event) {
     event.target.value = '';
 }
 
+// ========== 工作总结功能 ==========
+
+// 显示工作总结模态框
+function showSummaryModal() {
+    document.getElementById('summaryModal').classList.add('active');
+    renderSummary();
+}
+
+// 关闭工作总结模态框
+function closeSummaryModal() {
+    document.getElementById('summaryModal').classList.remove('active');
+}
+
+// 获取日期字符串 (YYYY-MM-DD)
+function getDateString(isoString) {
+    if (!isoString) return null;
+    return isoString.split('T')[0];
+}
+
+// 获取周信息
+function getWeekInfo(isoString) {
+    if (!isoString) return null;
+    const date = new Date(isoString);
+    const year = date.getFullYear();
+    const firstDay = new Date(year, 0, 1);
+    const dayOfYear = Math.floor((date - firstDay) / 86400000);
+    const weekNum = Math.ceil((dayOfYear + firstDay.getDay() + 1) / 7);
+    return { year, weekNum, label: `${year}年第${weekNum}周` };
+}
+
+// 收集所有任务数据（包括当前任务和归档）
+function getAllTasks() {
+    const all = [];
+    tasks.forEach(t => all.push({ ...t, source: 'current' }));
+    archives.forEach(a => all.push({ ...a, source: 'archive' }));
+    return all;
+}
+
+// 渲染工作总结
+function renderSummary() {
+    const allTasks = getAllTasks();
+    const container = document.getElementById('summaryContent');
+
+    if (allTasks.length === 0) {
+        container.innerHTML = `
+            <div class="archive-empty">
+                <div class="archive-empty-icon">📊</div>
+                <p>暂无数据，请先添加或加载任务</p>
+            </div>
+        `;
+        return;
+    }
+
+    // 统计数据
+    const totalTasks = allTasks.length;
+    const completedTasks = allTasks.filter(t => t.completedAt).length;
+    const totalSubtasks = allTasks.reduce((sum, t) => sum + (t.subtasks?.length || 0), 0);
+    const completedSubtasks = allTasks.reduce((sum, t) => sum + (t.subtasks?.filter(st => st.completed).length || 0), 0);
+    const completionRate = totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0;
+
+    // 按日期分组统计
+    const dailyStats = {};
+    const weeklyStats = {};
+
+    allTasks.forEach(task => {
+        // 按创建日期统计
+        const createDate = getDateString(task.createdAt);
+        if (createDate) {
+            if (!dailyStats[createDate]) {
+                dailyStats[createDate] = { date: createDate, created: 0, completed: 0, tasks: [] };
+            }
+            dailyStats[createDate].created++;
+            dailyStats[createDate].tasks.push(task);
+        }
+
+        // 按完成日期统计
+        if (task.completedAt) {
+            const completeDate = getDateString(task.completedAt);
+            if (completeDate) {
+                if (!dailyStats[completeDate]) {
+                    dailyStats[completeDate] = { date: completeDate, created: 0, completed: 0, tasks: [] };
+                }
+                dailyStats[completeDate].completed++;
+                if (!dailyStats[completeDate].tasks.find(t => t.id === task.id)) {
+                    dailyStats[completeDate].tasks.push(task);
+                }
+            }
+        }
+
+        // 按周统计
+        const weekInfo = getWeekInfo(task.createdAt);
+        if (weekInfo) {
+            const weekKey = `${weekInfo.year}-W${weekInfo.weekNum}`;
+            if (!weeklyStats[weekKey]) {
+                weeklyStats[weekKey] = { label: weekInfo.label, tasks: [], completed: 0, total: 0 };
+            }
+            weeklyStats[weekKey].tasks.push(task);
+            weeklyStats[weekKey].total++;
+            if (task.completedAt) weeklyStats[weekKey].completed++;
+        }
+    });
+
+    // 排序日期
+    const sortedDates = Object.keys(dailyStats).sort().reverse().slice(0, 14);
+    const sortedWeeks = Object.keys(weeklyStats).sort().reverse();
+
+    // 生成 HTML
+    let html = '';
+
+    // 1. 总体统计卡片
+    html += `
+        <div class="summary-section">
+            <h3>📈 总体概况</h3>
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="summary-card-value">${totalTasks}</div>
+                    <div class="summary-card-label">总任务数</div>
+                </div>
+                <div class="summary-card green">
+                    <div class="summary-card-value">${completedTasks}</div>
+                    <div class="summary-card-label">已完成任务</div>
+                </div>
+                <div class="summary-card blue">
+                    <div class="summary-card-value">${totalSubtasks}</div>
+                    <div class="summary-card-label">总子任务数</div>
+                </div>
+                <div class="summary-card orange">
+                    <div class="summary-card-value">${completedSubtasks}</div>
+                    <div class="summary-card-label">已完成子任务</div>
+                </div>
+                <div class="summary-card yellow">
+                    <div class="summary-card-value">${completionRate}%</div>
+                    <div class="summary-card-label">整体完成率</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 2. 每日完成趋势图
+    if (sortedDates.length > 0) {
+        const maxCompleted = Math.max(...sortedDates.map(d => dailyStats[d].completed), 1);
+        html += `
+            <div class="summary-section">
+                <h3>📅 近两周每日完成趋势</h3>
+                <div class="chart-container">
+                    <div class="bar-chart">
+                        ${sortedDates.reverse().map(date => {
+                            const stat = dailyStats[date];
+                            const height = stat.completed > 0 ? (stat.completed / maxCompleted * 100) : 0;
+                            return `
+                                <div class="bar-chart-item">
+                                    <div class="bar-chart-value">${stat.completed}</div>
+                                    <div class="bar-chart-bar" style="height: ${Math.max(height, 5)}%"></div>
+                                    <div class="bar-chart-label">${date.slice(5)}</div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // 3. 每日详细记录
+    if (sortedDates.length > 0) {
+        html += `
+            <div class="summary-section">
+                <h3>📝 每日工作记录</h3>
+                <div class="timeline">
+                    ${sortedDates.reverse().map(date => {
+                        const stat = dailyStats[date];
+                        const dayTasks = stat.tasks.filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i);
+                        return `
+                            <div class="timeline-item">
+                                <div class="timeline-date">
+                                    <span>${date}</span>
+                                    <span style="font-size:13px;color:#888;">创建 ${stat.created} | 完成 ${stat.completed}</span>
+                                </div>
+                                <div class="timeline-tasks">
+                                    ${dayTasks.slice(0, 5).map(task => `
+                                        <div class="timeline-task">
+                                            <span class="timeline-task-name">${task.name}</span>
+                                            <span class="timeline-task-meta">
+                                                ${task.completedAt ? '✅ 已完成' : `⏳ ${task.subtasks?.filter(st => st.completed).length || 0}/${task.subtasks?.length || 0}`}
+                                            </span>
+                                        </div>
+                                    `).join('')}
+                                    ${dayTasks.length > 5 ? `<div style="text-align:center;color:#888;font-size:12px;">...还有 ${dayTasks.length - 5} 个任务</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // 4. 每周总结
+    if (sortedWeeks.length > 0) {
+        html += `
+            <div class="summary-section">
+                <h3>📆 每周工作总结</h3>
+                <div class="weekly-grid">
+                    ${sortedWeeks.map(weekKey => {
+                        const week = weeklyStats[weekKey];
+                        const weekTasks = week.tasks.filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i);
+                        const rate = week.total > 0 ? Math.round((week.completed / week.total) * 100) : 0;
+                        return `
+                            <div class="weekly-card">
+                                <div class="weekly-header">${week.label}</div>
+                                <div class="weekly-stats">
+                                    <div class="weekly-stat">
+                                        <div class="weekly-stat-value">${week.total}</div>
+                                        <div class="weekly-stat-label">总任务</div>
+                                    </div>
+                                    <div class="weekly-stat">
+                                        <div class="weekly-stat-value">${week.completed}</div>
+                                        <div class="weekly-stat-label">已完成</div>
+                                    </div>
+                                    <div class="weekly-stat">
+                                        <div class="weekly-stat-value">${rate}%</div>
+                                        <div class="weekly-stat-label">完成率</div>
+                                    </div>
+                                    <div class="weekly-stat">
+                                        <div class="weekly-stat-value">${weekTasks.reduce((s, t) => s + (t.subtasks?.length || 0), 0)}</div>
+                                        <div class="weekly-stat-label">子任务</div>
+                                    </div>
+                                </div>
+                                <div class="weekly-tasks">
+                                    ${weekTasks.slice(0, 4).map(task => `
+                                        <div class="weekly-task ${task.completedAt ? 'completed' : 'pending'}">
+                                            <span>${task.name}</span>
+                                            <span>${task.completedAt ? '✅' : '⏳'}</span>
+                                        </div>
+                                    `).join('')}
+                                    ${weekTasks.length > 4 ? `<div style="text-align:center;color:#888;font-size:12px;">...还有 ${weekTasks.length - 4} 个任务</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+// 导出工作总结到文件
+function exportSummaryToFile() {
+    const allTasks = getAllTasks();
+    if (allTasks.length === 0) {
+        alert('当前没有数据可导出！');
+        return;
+    }
+
+    const totalTasks = allTasks.length;
+    const completedTasks = allTasks.filter(t => t.completedAt).length;
+    const totalSubtasks = allTasks.reduce((sum, t) => sum + (t.subtasks?.length || 0), 0);
+    const completedSubtasks = allTasks.reduce((sum, t) => sum + (t.subtasks?.filter(st => st.completed).length || 0), 0);
+
+    const report = {
+        version: '2.0',
+        exportType: 'summary',
+        exportDate: new Date().toISOString(),
+        overview: {
+            totalTasks,
+            completedTasks,
+            totalSubtasks,
+            completedSubtasks,
+            completionRate: totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0
+        },
+        tasks: allTasks.map(t => ({
+            name: t.name,
+            createdAt: t.createdAt,
+            completedAt: t.completedAt,
+            progress: t.subtasks?.length > 0 ? Math.round((t.subtasks.filter(st => st.completed).length / t.subtasks.length) * 100) : 0,
+            subtasks: t.subtasks?.map(st => ({
+                text: st.text,
+                completed: st.completed,
+                completedAt: st.completedAt
+            })) || []
+        }))
+    };
+
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `todo-summary-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
 // 键盘事件处理
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         closeAddTaskModal();
         closeArchiveModal();
+        closeSummaryModal();
     }
 });
 
@@ -504,6 +801,12 @@ document.getElementById('addTaskModal').addEventListener('click', function(e) {
 document.getElementById('archiveModal').addEventListener('click', function(e) {
     if (e.target === this) {
         closeArchiveModal();
+    }
+});
+
+document.getElementById('summaryModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeSummaryModal();
     }
 });
 
